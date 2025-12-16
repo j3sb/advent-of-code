@@ -1,164 +1,49 @@
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap, VecDeque},
-    fs,
-};
+use std::fs;
 
-#[derive(PartialEq, Eq)]
-struct Node {
-    state: Vec<u64>,
-    path: Vec<usize>,
-    g: u64, // cost
-    f: u64, // cost + heuristic
-}
+use good_lp::*;
 
-// Reverse ordering for min-heap behavior
-impl Ord for Node {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.f.cmp(&self.f).then_with(|| other.g.cmp(&self.g))
+// find vec x so that Ax = b, maximize c^Tx and x>0
+// b is goal
+// A is which button increments the counter
+// x is the number of times a button has been pressed
+// c is 1 (or -1)
+fn solve_simplex(buttons: &Vec<Vec<usize>>, goal: &Vec<u64>) -> f64 {
+    let mut A: Vec<Vec<u32>> = vec![vec![0; buttons.len()]; goal.len()]; // width of buttons, height of goal, u32 is probably fine?
+    for (x, button) in buttons.iter().enumerate() {
+        for y in button {
+            A[*y][x] = 1;
+        }
     }
-}
 
-impl PartialOrd for Node {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-// approx distance left
-fn heuristic(state: &Vec<u64>, goal: &Vec<u64>) -> u64 {
-    state
+    let mut vars = variables!();
+    let xs: Vec<Variable> = buttons
         .iter()
-        .zip(goal)
-        .map(|(s, g)| g.saturating_sub(*s))
-        .max()
-        .expect("some heuristic value")
-}
+        .map(|_| vars.add(variable().integer().min(0)))
+        .collect();
 
-fn a_star(buttons: &Vec<Vec<usize>>, goal: &Vec<u64>) -> Vec<usize> {
-    let start_state: Vec<u64> = vec![0; goal.len()];
+    let mut problem = vars
+        .minimise(xs.iter().fold(Expression::from(0), |acc, x| acc + x))
+        .using(default_solver);
 
-    let mut open: BinaryHeap<Node> = BinaryHeap::new();
-    let mut best_g: HashMap<Vec<u64>, u64> = HashMap::new();
-
-    let h0 = heuristic(&start_state, goal);
-
-    open.push(Node {
-        state: start_state.clone(),
-        path: vec![],
-        g: 0,
-        f: h0,
-    });
-
-    best_g.insert(start_state, 0);
-
-    while let Some(node) = open.pop() {
-        let state = &node.state;
-
-        if state == goal {
-            return node.path;
-        }
-
-        println!(
-            "searching at depth {}, stack is {} long",
-            node.g,
-            open.len()
-        );
-        // println!("stack: {:?}", stack);
-
-        // 1 + 1;
-
-        for (button_index, button) in buttons.iter().enumerate() {
-            let mut new_state = state.clone();
-
-            for index in button {
-                new_state[*index] += 1;
-
-                // skip if missed
-                if new_state[*index] > goal[*index] {
-                    continue;
-                }
-            }
-
-            let new_g = node.g + 1;
-
-            if let Some(&known_g) = best_g.get(&new_state) {
-                // we already have a better path to that state
-                if new_g >= known_g {
-                    continue;
-                }
-            }
-
-            let h = heuristic(&new_state, goal);
-            let new_f = new_g + h;
-
-            let mut new_path = node.path.clone();
-            new_path.push(button_index);
-
-            best_g.insert(new_state.clone(), new_g);
-
-            open.push(Node {
-                state: new_state,
-                path: new_path,
-                g: new_g,
-                f: new_f,
-            });
-        }
+    for (row, &bi) in A.iter().zip(goal) {
+        let expr: Expression = row
+            .iter()
+            .zip(&xs)
+            .fold(Expression::from(0), |acc, (a, x)| acc + *x * *a);
+        problem = problem.with(expr.eq(bi as u32)); // hmm u32? probably fine
     }
 
-    // didn't find a way
-    return vec![];
-}
-fn bfs(buttons: &Vec<Vec<usize>>, goal: &Vec<u64>) -> Vec<usize> {
-    let mut state_stack: VecDeque<Vec<u64>> = VecDeque::from(vec![(vec![0; goal.len()])]);
-    let mut path_stack: VecDeque<Vec<usize>> = VecDeque::from(vec![(vec![])]);
+    let answer = problem.solve().expect("a solution");
 
-    while let Some(state) = state_stack.pop_front() {
-        let path = path_stack.pop_front().expect("a path for each state");
+    let solution: Vec<f64> = xs.iter().map(|x| answer.value(*x)).collect();
+    println!("{:?}", solution);
 
-        // println!(
-        //     "searching at depth {}, stack is {} long",
-        //     path.len(),
-        //     state_stack.len()
-        // );
-        // println!("stack: {:?}", stack);
-
-        // 1 + 1;
-
-        for (button_index, button) in buttons.iter().enumerate() {
-            let mut new_state = state.clone();
-            for index in button {
-                new_state[*index] += 1;
-            }
-
-            for (index, value) in new_state.iter().enumerate() {
-                if *value > goal[index] {
-                    continue;
-                }
-            }
-
-            if state_stack.contains(&new_state) {
-                continue;
-            }
-
-            let mut new_path = path.clone();
-            new_path.push(button_index);
-
-            if new_state == *goal {
-                return new_path;
-            }
-
-            state_stack.push_back(new_state);
-            path_stack.push_back(new_path);
-        }
-    }
-
-    // didn't find a way
-    return vec![];
+    let sum = solution.iter().fold(0.0, |acc, s| acc + s);
+    sum
 }
 
 fn main() {
-    let data = fs::read_to_string("input.test.txt").expect("an input file");
+    let data = fs::read_to_string("input.txt").expect("an input file");
 
     let table_data: Vec<Vec<&str>> = data.split('\n').map(|l| l.split(' ').collect()).collect();
 
@@ -212,17 +97,15 @@ fn main() {
     // println!("{:?}", buttons);
     // println!("{:?}", joltages);
 
-    let mut sum = 0;
+    let mut sum = 0.0;
     for i in 0..lights_goals.len() {
-        let path: Vec<usize> = a_star(&buttons[i], &joltages[i]);
-        println!(
-            "path is of length {}: {:?} for buttons {:?} and goal {:?}",
-            path.len(),
-            path,
-            buttons[i],
-            joltages[i]
-        );
-        sum += path.len();
+        // let i = 9;
+        let n = solve_simplex(&buttons[i], &joltages[i]);
+        // println!(
+        //     "path is of length {}: for buttons {:?} and goal {:?}",
+        //     n, buttons[i], joltages[i]
+        // );
+        sum += n;
     }
     println!("sum is {sum}");
 }
