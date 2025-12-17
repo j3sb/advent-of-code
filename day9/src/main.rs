@@ -117,27 +117,37 @@ fn is_valid((x1, y1): (i64, i64), (x2, y2): (i64, i64), positions: &Vec<(i64, i6
         return false;
     }
 
-    // top and bottom line
-    for x in left..right {
-        let top_line = (x, top);
-        let bot_line = (x, bot);
+    // serial implementation
+    // // top and bottom line
+    // for x in left..right {
+    //     let top_line = (x, top);
+    //     let bot_line = (x, bot);
 
-        if !(is_inside(top_line, positions) && is_inside(bot_line, positions)) {
-            return false;
-        }
-    }
+    //     if !(is_inside(top_line, positions) && is_inside(bot_line, positions)) {
+    //         return false;
+    //     }
+    // }
 
-    // left and right line
-    for y in bot..top {
-        let left_line = (left, y);
-        let right_line = (right, y);
+    // // left and right line
+    // for y in bot..top {
+    //     let left_line = (left, y);
+    //     let right_line = (right, y);
 
-        if !(is_inside(left_line, positions) && is_inside(right_line, positions)) {
-            return false;
-        }
-    }
+    //     if !(is_inside(left_line, positions) && is_inside(right_line, positions)) {
+    //         return false;
+    //     }
+    // }
 
-    return true;
+    // return true;
+
+    // parallel implementation
+    let horizontal = (left..right).into_par_iter().map(|x| ((x, top), (x, bot)));
+    let vertical = (bot..top).into_par_iter().map(|y| ((left, y), (right, y)));
+
+    return horizontal
+        .chain(vertical)
+        .into_par_iter()
+        .all(|(a, b)| is_inside(a, positions) && is_inside(b, positions));
 }
 
 fn main() {
