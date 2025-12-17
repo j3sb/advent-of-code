@@ -1,4 +1,4 @@
-// use stacksafe::stacksafe;
+use rayon::prelude::*;
 use std::fs;
 
 fn area((x1, y1): (i64, i64), (x2, y2): (i64, i64)) -> i64 {
@@ -36,23 +36,38 @@ fn is_between_vert(a: (i64, i64), b: (i64, i64), pos: (i64, i64)) -> bool {
     let top;
     let bot;
     let mid;
-    if a.0 == b.0 {
-        if pos.0 != a.0 {
-            return false;
+
+    if a.0 < pos.0 || b.0 < pos.0 {
+        if a.0 == b.0 {
+            // vertical
+            top = a.1.max(b.1);
+            bot = a.1.min(b.1);
+            mid = pos.1;
+
+            return bot <= mid && mid < top;
+        } else {
+            // horizontal
+
+            if a.1 == pos.1 && (a.0 > pos.0 || b.0 > pos.0) {
+                return true;
+            } else {
+                return false;
+            }
         }
-        top = a.1.max(b.1);
-        bot = a.1.min(b.1);
-        mid = pos.1;
     } else {
         return false;
     }
-
-    return bot <= mid && mid <= top;
 }
 
-fn _is_green_old(positions: &Vec<(i64, i64)>, pos: (i64, i64)) -> bool {
+fn is_inside(pos: (i64, i64), positions: &Vec<(i64, i64)>) -> bool {
+    let mut intersections: u64 = 0;
+
     let first_pos = positions[0];
     let last_pos = positions[positions.len() - 1];
+
+    if is_between_vert(first_pos, last_pos, pos) {
+        intersections += 1;
+    }
 
     if is_between(first_pos, last_pos, pos) {
         return true;
@@ -62,75 +77,22 @@ fn _is_green_old(positions: &Vec<(i64, i64)>, pos: (i64, i64)) -> bool {
         let a = positions[i];
         let b = positions[i + 1];
 
+        if is_between_vert(a, b, pos) {
+            intersections += 1;
+        }
+
         if is_between(a, b, pos) {
             return true;
         }
     }
 
-    return false;
-}
-
-fn is_green(positions: &Vec<(i64, i64)>, pos: (i64, i64)) -> bool {
-    let first_pos = positions[0];
-    let last_pos = positions[positions.len() - 1];
-
-    if is_between_vert(first_pos, last_pos, pos) {
-        return true;
-    }
-
-    for i in 0..(positions.len() - 1) {
-        let a = positions[i];
-        let b = positions[i + 1];
-
-        if is_between_vert(a, b, pos) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-fn _is_inside_old(pos: (i64, i64), positions: &Vec<(i64, i64)>, max: i64) -> bool {
-    for d in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-        let mut current_pos = pos;
-        loop {
-            if current_pos.0 < 0 || current_pos.0 > max || current_pos.0 < 0 || current_pos.0 > max
-            {
-                return false;
-            }
-
-            if is_green(positions, current_pos) {
-                break;
-            }
-
-            current_pos.0 += d.0;
-            current_pos.1 += d.1;
-        }
-    }
-
-    return true;
-}
-
-fn is_inside(pos: (i64, i64), positions: &Vec<(i64, i64)>, max: i64) -> bool {
-    let mut intersections = 0;
-
-    for i in 0..pos.0 {
-        if is_green(positions, (i, pos.1)) {
-            intersections += 1;
-        }
-    }
-
+    // return false;
     return intersections % 2 == 1;
 }
 
 static mut COUNTER: u64 = 0;
 
-fn is_valid(
-    (x1, y1): (i64, i64),
-    (x2, y2): (i64, i64),
-    positions: &Vec<(i64, i64)>,
-    max: i64,
-) -> bool {
+fn is_valid((x1, y1): (i64, i64), (x2, y2): (i64, i64), positions: &Vec<(i64, i64)>) -> bool {
     let left = x1.min(x2);
     let right = x1.max(x2);
     let bot = y1.min(y2);
@@ -146,56 +108,40 @@ fn is_valid(
         COUNTER += 1;
     }
 
-    return is_inside(top_left, positions, max)
-        && is_inside(top_right, positions, max)
-        && is_inside(bot_left, positions, max)
-        && is_inside(bot_right, positions, max);
-}
+    // corners are inside
+    if !(is_inside(top_left, positions)
+        && is_inside(top_right, positions)
+        && is_inside(bot_left, positions)
+        && is_inside(bot_right, positions))
+    {
+        return false;
+    }
 
-fn flood(s: (i64, i64), b: &mut Vec<Vec<bool>>, positions: &Vec<(i64, i64)>) {
-    let mut stack = vec![s];
+    // top and bottom line
+    for x in left..right {
+        let top_line = (x, top);
+        let bot_line = (x, bot);
 
-    while let Some(pos) = stack.pop() {
-        println!("flooding {:?}", pos);
-        let top = (pos.0, pos.1 + 1);
-        let bot = (pos.0, pos.1 - 1);
-        let left = (pos.0 - 1, pos.1);
-        let right = (pos.0 + 1, pos.1);
-
-        if !b[top.0 as usize][top.1 as usize] {
-            b[top.0 as usize][top.1 as usize] = true;
-            if !is_green(positions, top) {
-                stack.push(top);
-            } else {
-                println!("is green!!");
-            }
-        }
-
-        if !b[bot.0 as usize][bot.1 as usize] {
-            b[bot.0 as usize][bot.1 as usize] = true;
-            if !is_green(positions, bot) {
-                stack.push(bot);
-            }
-        }
-
-        if !b[left.0 as usize][left.1 as usize] {
-            b[left.0 as usize][left.1 as usize] = true;
-            if !is_green(positions, left) {
-                stack.push(left);
-            }
-        }
-
-        if !b[right.0 as usize][right.1 as usize] {
-            b[right.0 as usize][right.1 as usize] = true;
-            if !is_green(positions, right) {
-                stack.push(right);
-            }
+        if !(is_inside(top_line, positions) && is_inside(bot_line, positions)) {
+            return false;
         }
     }
+
+    // left and right line
+    for y in bot..top {
+        let left_line = (left, y);
+        let right_line = (right, y);
+
+        if !(is_inside(left_line, positions) && is_inside(right_line, positions)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 fn main() {
-    let data = fs::read_to_string("input.test.txt").expect("input file");
+    let data = fs::read_to_string("input.txt").expect("input file");
 
     let positions: Vec<(i64, i64)> = data
         .split("\n")
@@ -216,39 +162,6 @@ fn main() {
         .expect("a max value")
         + 2;
 
-    // let t = (positions[0].0 - 1, positions[0].1 + 1); // everything else is outside
-    // let t = (positions[0].0 + 1, positions[0].1 + 1); // everything else is outside (test)
-    // println!("is inside: {}", is_inside(t, &positions, max));
-
-    // let mut b: Vec<Vec<bool>> = Vec::with_capacity(max as usize);
-
-    // for i in 0..(max as usize) {
-    //     b.push(Vec::with_capacity(max as usize));
-    //     for _ in 0..max {
-    //         b[i].push(false);
-    //     }
-    // }
-
-    // println!("{}", b.len());
-    // println!("{}", b.len());
-    // println!("{}", b.len());
-    // println!("{}", b.len());
-
-    // println!("flodded");
-
-    // for y in 0..max {
-    //     for x in 0..max {
-    //         if positions.contains(&(x as i64, y as i64)) {
-    //             print!("#");
-    //         } else if b[x as usize][y as usize] {
-    //             print!("X");
-    //         } else {
-    //             print!(".");
-    //         }
-    //     }
-    //     print!("\n");
-    // }
-
     let areas: Vec<Vec<i64>> = positions
         .iter()
         .map(|p1| positions.iter().map(|p2| area(*p1, *p2)).collect())
@@ -258,7 +171,7 @@ fn main() {
         "areas: {}",
         areas.iter().flatten().collect::<Vec<&i64>>().len(),
     );
-    println!("max: {max}");
+    println!("max coord: {max}");
 
     let allowed_areas: Vec<Vec<i64>> = areas
         .iter()
@@ -266,11 +179,22 @@ fn main() {
         .map(|(y, row)| {
             row.iter()
                 .enumerate()
-                .filter(|(x, _a)| is_valid(positions[*x], positions[y], &positions, max))
+                .filter(|(x, _a)| is_valid(positions[*x], positions[y], &positions))
                 .map(|(_x, a)| *a)
                 .collect()
         })
         .collect();
+
+    // for y in 0..max {
+    //     for x in 0..max {
+    //         if is_inside((x as i64, y as i64), &positions) {
+    //             print!("#");
+    //         } else {
+    //             print!(".");
+    //         }
+    //     }
+    //     print!("\n");
+    // }
 
     let max_area = allowed_areas
         .iter()
@@ -278,18 +202,7 @@ fn main() {
         .max()
         .expect("some max value");
 
-    println!("{max_area}");
-
-    for y in 0..max {
-        for x in 0..max {
-            if is_inside((x as i64, y as i64), &positions, max) {
-                print!("#");
-            } else {
-                print!(".");
-            }
-        }
-        print!("\n");
-    }
+    println!("max area: {max_area}");
 
     // println!("{:?}", areas);
     // println!("{:?}", allowed_areas);
